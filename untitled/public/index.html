@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>MapD</title>
+    <meta charset="UTF-8">
+    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+    <link href='https://fonts.googleapis.com/css?family=Roboto:400,700,300' rel='stylesheet' type='text/css'>
+    <style>
+      .title {
+        font-weight: bold;
+        text-align:center;
+      }
+      .mapd {
+        position: relative;
+        top: 2px;
+      }
+      .search{
+        display: inline-block;
+        margin-top: 12px;
+        margin-left: 50px;
+      }
+      .data-count {
+        padding-right:20px;
+      }
+      .data-count2 {
+        padding-right:20px;
+      }
+      .filter-count {
+        font-weight: bold;
+        color:  #45B1E8;
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="navbar navbar-default">
+      <div class="container-fluid">
+        <div class="navbar-header" style="margin-top:10px">
+          <img alt="Brand" src="images/favicon.png" height="30" width="30">
+          <span class="mapd">MapD Demo</span>
+        </div>
+        <div class="navbar-text navbar-right">
+        <div class="data-count1">
+          <span class="total"><span><span class="filter-count"></span></span>
+          <span>of <span class="total-count"></span> Natural Gas Points</span>
+        </div>
+        </div>
+      </div>
+    </nav>
+
+    <div class="main-container">
+      <div class="col-xs-12">
+        <div class="title">Gas Production Locations and Pipelines in US</div>
+        <div id="chart1-example"></div>
+      </div>
+
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.13.0/moment.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.4/lodash.min.js"></script>
+    <script src="https://code.jquery.com/jquery-2.2.4.min.js" integrity="sha256-BbhdlvQf/xTY9gja0Dq3HiwQF8LaCRTXxZKRutelT44=" crossorigin="anonymous"></script>
+    <script src="assets/app.bundle.js"></script>
+    <script> 
+/*
+ * This is example code that shows how to make a scatterplot widget that backend
+ * renders multiple layers.
+ */
+
+document.addEventListener("DOMContentLoaded", function init() {
+  // A MapdCon instance is used for performing raw queries on a MapD GPU database.
+  new MapdCon()
+    .protocol("https")
+    .host("use2-api.mapd.cloud") // Connect to OmniSci Cloud Host
+    .port("443")
+    .dbName("mapd")               // Default database
+    .user("F0A7674FB728C4DE89A0") // Enter from SETTINGS on cloud portal
+    .password("fiNNiSG6YFZYac7Y9qLROCbbFRSif7L12BWfErSn")
+    .connect(function(error, con) {
+      // Tables for the first layer of the pointmap.
+      // This layer will be polygons of zipcodes and
+      // will be colored by data joined from the contributions
+      // table
+      // Get a table from the database
+      var tableName1 = 'vs_gas_production_us_2018';
+      // A CrossFilter instance is used for generating the raw query strings for your MapdCon.
+      var crossFilter = crossfilter.crossfilter(con, tableName1).then(function(cf1) {
+          createCharts(cf1, con)
+      });
+      });
+
+  // function to create the backend-rendered map.
+  function createCharts(pointcfLayer1, con) {
+    var w = document.documentElement.clientWidth - 30;
+    var h = Math.max(document.documentElement.clientHeight, window.innerHeight || 0) - 200;
+    var mapboxToken = "pk.eyJ1IjoibWFwZCIsImEiOiJjaWV1a3NqanYwajVsbmdtMDZzc2pneDVpIn0.cJnk8c2AxdNiRNZWtx5A9g";
+
+    /*---------------------BASIC COUNT ON CROSSFILTER--------------------------*/
+    /*
+     *  Adding a basic count of the point layers using crossfilter.
+     *  Note that for the count we use crossFilter itself as the dimension.
+     */
+    var countGroup1 = pointcfLayer1.groupAll();
+    var dataCount1 = dc.countWidget(".data-count1")
+                       .dimension(pointcfLayer1)
+                       .group(countGroup1);
+
+    /*----------------BUILD THE LAYERS OF THE POINTMAP-------------------------*/
+
+    //var pointMapDim2 = pointcfLayer1.dimension(null).projectOn(["goog_x", "goog_y", "lang as color", "followers as size"]);
+    var pointMapDim2 = pointcfLayer1.dimension(null).projectOn(["conv_4326_900913_x(Longitude) as x", "conv_4326_900913_y(Latitude) as y", "FlowDirection as color", "flow_value as size"]);
+
+    // we need separate dimensions for the x and y coordinates for point layers.
+    // A filter is applied to these dimensions under the hood so that we only
+    // render points that are within the view.
+    var xDim2 = pointcfLayer1.dimension("Longitude");
+    var yDim2 = pointcfLayer1.dimension("Latitude");
+
+    var sizeScaleLayer2 = d3.scale.linear().domain([0,5000]).range([1,5]);
+
+const colorRange = ["#27aeef", "#ea5545", "#87bc45", "#b33dc6", "#f46a9b", "#ede15b", "#bdcf32", "#ef9b20", "#4db6ac", "#edbf33", "#7c4dff"]
+const colorDomain = [
+"Delivery",
+"Receipt",
+"Throughput",
+"Bidirectional",
+"Unknown",
+"Mainline",
+"Storage",
+"TD1",
+"TD2",
+"Withdrawal",
+"Other"
+]
+
+    var layer2ColorScale = d3.scale.ordinal().domain(colorDomain).range(colorRange);
+
+    var pointLayer1 = dc
+    .rasterLayer("points")
+    .crossfilter(pointcfLayer1)
+    .setState({
+      transform: {
+        sample: true,
+        limit: 500000
+      },
+      mark: "point",
+      encoding: {
+        x: {
+          type: "quantitative",
+          field: "conv_4326_900913_x(Longitude)"
+        },
+        y: {
+          type: "quantitative",
+          field: "conv_4326_900913_y(Latitude)"
+        },
+        size: {
+          type: "quantitative",
+          field: "flow_value",
+          domain: [0, 2000000],
+          //domain: [0, 5000],
+          range: [10, 15]
+        },
+        color: {
+          type: "ordinal",
+          field: "FlowDirection",
+          domain: colorDomain,
+          range: colorRange
+        }
+      },
+      config: {
+        point: {
+          shape: "circle"
+        }
+      }
+    })
+    .xDim(xDim2)
+    .yDim(yDim2)
+    .popupColumns(['DisplayName', 'PointType', 'FlowDirection', 'flow_value', 'Region', 'County', 'DisplayName'])
+
+
+    /*---------------BUILD THE POINTMAP-------------*/
+    // grab the parent div.
+    var parent = document.getElementById("chart1-example");
+
+    var pointMapChart = dc.rasterChart(parent, true) // create a raster chart. true indicates a pointmap
+                          .con(con)             // indicate the connection layer
+                          .usePixelRatio(true)  // tells the widget to use the pixel ratio of the
+                                                // screen for proper sizing of the backend-rendered image
+                          .useLonLat(true)    // all point layers need their x,y coordinates, which
+                                              // are lon,lat converted to mercator.
+                          .height(h/1.25)  // set width/height
+                          .width(w)
+                          .mapUpdateInterval(750)
+                          .mapStyle('mapbox://styles/mapbox/light-v8')
+                          .mapboxToken(mapboxToken) // need a mapbox accessToken for loading the tiles
+
+                          // add the layers to the pointmap
+                          .pushLayer('pointtable1', pointLayer1)
+
+                          // and setup a buffer radius around the pixels for hit-testing
+                          // This radius helps to properly resolve hit-testing at boundaries
+                          .popupSearchRadius(2)
+                          .useGeoTypes(true) // XXXX
+
+    pointMapChart.init().then(function() {
+      // now render the pointmap
+      dc.renderAllAsync()
+
+
+      /*---------------SETUP HIT-TESTING-------------*/
+      // hover effect with popup
+      // Use a flag to determine if the map is in motion
+      // or not (pan/zoom/etc)
+      var mapmove = false;
+
+      // debounce the popup - we only want to show the popup when the
+      // cursor is idle for a portion of a second.
+      var debouncedPopup = _.debounce(displayPopupWithData, 250)
+      pointMapChart.map().on('movestart', function() {
+        // map has started moving in some way, so cancel
+        // any debouncing, and hide any current popups.
+        mapmove = true;
+        debouncedPopup.cancel();
+        pointMapChart.hidePopup();
+      });
+
+      pointMapChart.map().on('moveend', function(event) {
+        // map has stopped moving, so start a debounce event.
+        // If the cursor is idle, a popup will show if the
+        // cursor is over a layer element.
+        mapmove = false;
+        debouncedPopup(event);
+        pointMapChart.hidePopup();
+      });
+
+      pointMapChart.map().on('mousemove', function(event) {
+        // mouse has started moving, so hide any existing
+        // popups. 'true' in the following call says to
+        // animate the hiding of the popup
+        pointMapChart.hidePopup(true);
+
+        // start a debound popup event if the map isn't
+        // in motion
+        if (!mapmove) {
+          debouncedPopup(event);
+        }
+      })
+
+      // callback function for when the mouse has been idle for a moment.
+      function displayPopupWithData (event) {
+        if (event.point) {
+          // check the pointmap for hit-testing. If a layer's element is found under
+          // the cursor, then display a popup of the resulting columns
+          pointMapChart.getClosestResult(event.point, function(closestPointResult) {
+            // 'true' indicates to animate the popup when starting to display
+            pointMapChart.displayPopup(closestPointResult, true)
+          });
+        }
+      }
+
+      /*--------------------------RESIZE EVENT------------------------------*/
+      /* Here we listen to any resizes of the main window.  On resize we resize the corresponding widgets and call dc.renderAll() to refresh everything */
+
+      window.addEventListener("resize", _.debounce(reSizeAll, 500));
+
+      function reSizeAll() {
+        var w = document.documentElement.clientWidth - 30;
+        var h = Math.max(document.documentElement.clientHeight, window.innerHeight || 0) - 150;
+
+        pointMapChart
+          .width(w)
+          .height(h/1.25);
+
+        dc.redrawAllAsync();
+      }
+    })
+  }
+
+});
+    </script>
+  </body>
+</html>
